@@ -1,98 +1,363 @@
 # Agent Repertoire
 
-A personal repertoire of reusable operational tools for AI agents — exposed to agents over MCP and to humans over a CLI, backed by SQLite/FTS5 and plain files.
+> **Teach your AI agent a tool once. Reuse it forever.**
 
-## What is it?
+Agent Repertoire is a local, persistent repertoire of reusable tools for AI coding agents.
 
-Agents routinely re-execute expensive multi-step workflows (`gcloud logging read` × 3 + `jq` + `python` …) instead of reusing what already worked. Agent Repertoire lets an agent **discover, inspect, execute, and create** parameterized tools once, then reuse them forever:
+![Agent Repertoire — reusable tools for AI agents](docs/images/agent-repertoire-overview.png)
 
-- Tool metadata lives in `~/.agent-repertoire/repertoire.db` (SQLite, FTS-indexed); scripts live in `~/.agent-repertoire/tools/<name>/`.
-- The MCP server exposes six tools (`search_tools`, `inspect_tool`, `run_tool`, `create_tool`, `get_tool_source`, `update_tool`), so learned tools never pollute the agent's tool list.
-- Tool arguments are validated against a JSON Schema before execution and passed as JSON on stdin — no shell, no string concatenation.
-- Identical behavior from the CLI (`rep …`) and the MCP server (`rep mcp`).
+Instead of making an agent rediscover the same multi-step workflow every time, Agent Repertoire lets it **create, search, inspect, run, and improve tools** that persist across sessions.
 
-## Install
+Works through **MCP for agents** and a simple **`rep` CLI for humans**.
 
-One line, no Rust, no sudo:
+## Why?
+
+AI agents are good at solving problems.
+
+But they often solve the **same problem from scratch**.
+
+A workflow like:
+
+```text
+gcloud logging read ...
+    ↓
+jq ...
+    ↓
+python ...
+    ↓
+filter / transform / summarize
+```
+
+may work perfectly today — and then be reconstructed from scratch tomorrow.
+
+Agent Repertoire turns successful workflows into reusable tools:
+
+```text
+        ┌─────────────────┐
+        │   Discover      │
+        │   a tool        │
+        └────────┬────────┘
+                 ↓
+        ┌─────────────────┐
+        │    Inspect      │
+        │   its contract  │
+        └────────┬────────┘
+                 ↓
+        ┌─────────────────┐
+        │      Run        │
+        │   the workflow  │
+        └────────┬────────┘
+                 ↓
+        ┌─────────────────┐
+        │     Create      │
+        │   new reusable  │
+        │      tools      │
+        └────────┬────────┘
+                 ↓
+           Reuse forever
+```
+
+The repertoire lives locally, so your tools stay with you instead of becoming part of a remote service or a giant agent tool list.
+
+---
+
+## Quick start
+
+### 1. Install
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/andresdigiovanni/agent-repertoire/main/install.sh | bash
 ```
 
-The script detects your platform (Linux x86_64/arm64, macOS Intel/Apple Silicon), downloads the matching binary from GitHub Releases, verifies it against the published `SHA256SUMS`, and installs it to `~/.local/bin/rep`. If that directory is not on your `PATH`, the installer prints the exact line to add to your shell profile.
+The installer downloads the appropriate release binary, verifies its checksum, and installs `rep` into `~/.local/bin`.
 
-On Windows, download `rep-v<version>-x86_64-pc-windows-msvc.zip` from the [releases page](https://github.com/andresdigiovanni/agent-repertoire/releases/latest) and extract `rep.exe` to a directory on your `PATH`.
+### 2. Connect your agent
 
-To install a specific version instead of the latest:
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/andresdigiovanni/agent-repertoire/main/install.sh | bash -s -- --version v0.1.0
-```
-
-### Requirements
-
-- `bash` and `curl` (or `wget`) to run the installer.
-- `python3` and `bash` on `PATH` — stored tools run as Python or Bash subprocesses.
-- One of Claude Code, OpenCode, or Codex, if you want your agent to use the repertoire.
-
-## Update
-
-Re-run the same one-liner — it upgrades `~/.local/bin/rep` in place. To go back to a previous release, pass `--version vX.Y.Z`.
-
-## Uninstall
-
-1. Remove the Skill and the MCP entry from every configured agent:
+For Claude Code:
 
 ```bash
-rep uninstall
+rep install --target claude
 ```
 
-This deletes the `agent-repertoire` skill directory from Claude Code, OpenCode, and Codex, and strips the `agent-repertoire` block from each agent's MCP config (`~/.claude.json`, `~/.config/opencode/opencode.json{,.c}`, `~/.codex/config.toml`). Re-running is safe; anything already absent is skipped silently (`nothing to uninstall` when nothing is left) and the command exits 0.
-
-2. To also delete the data directory (`~/.agent-repertoire/`, containing every stored tool), pass `--all`:
+For OpenCode:
 
 ```bash
-rep uninstall --all      # interactive confirmation
-rep uninstall --all --yes   # non-interactive / scripts
+rep install --target opencode
 ```
 
-Without `--all`, the data directory is untouched.
-
-3. Remove the binary:
+For Codex:
 
 ```bash
-rm ~/.local/bin/rep
+rep install --target codex
 ```
 
-## What it installs and what it modifies
-
-| Path | What | Created by |
-|---|---|---|
-| `~/.local/bin/rep` | The binary | `install.sh` |
-| `~/.agent-repertoire/` | `repertoire.db` (SQLite + FTS5) and `tools/<name>/` (tool scripts) | first `rep` command |
-| `~/.claude/skills/agent-repertoire/`, `~/.config/opencode/skills/agent-repertoire/`, `~/.codex/skills/agent-repertoire/` | The Skill (teaches your agent when to reach for the repertoire) | `rep install --target …` |
-| `~/.claude.json`, `~/.config/opencode/opencode.json{,.c}`, `~/.codex/config.toml` | One MCP server entry per agent | `rep install --target …` |
-
-The data root can be relocated with the `AGENT_REPERTOIRE_HOME` environment variable (useful for tests/CI).
-
-## Set up your agent
-
-Two pieces give an agent full access: registering the MCP server (so it can search, inspect, run, and create tools) and installing the Skill (so it knows when to do so). `rep install` does both for one agent; after configuring, restart your agent session.
+Or configure all three:
 
 ```bash
-rep install --target claude     # or: opencode, codex
-rep install --all               # all three
+rep install --all
 ```
 
-Bare `rep install` (no flags) opens an interactive multi-select of the supported providers. Without a terminal (pipes, scripts, CI) it refuses to guess and exits with an error: pass `--target <claude|opencode|codex>` or `--all`.
+Restart your agent session after installation.
 
-Installing the Skill overwrites the skill directory (`SKILL.md` + `references/`) with a warning.
+### 3. Create a tool
 
-Prefer to configure by hand? Register the MCP server yourself:
+A tool is simply a small, parameterized workflow with a defined contract.
+
+For example:
+
+```yaml
+name: find_large_files
+description: Find files larger than a given size
+language: bash
+entrypoint: run.sh
+
+keywords:
+  - files
+  - disk
+  - size
+  - cleanup
+```
+
+Then:
+
+```bash
+rep create --file tool.yaml
+```
+
+### 4. Find and run it
+
+```bash
+rep search "files"
+```
+
+```bash
+rep inspect find_large_files
+```
+
+```bash
+rep run find_large_files size_mb=100
+```
+
+That's the basic loop:
+
+```text
+search → inspect → run
+```
+
+And agents can perform the same operations through MCP.
+
+---
+
+## What Agent Repertoire gives your agent
+
+### 🔎 Discover
+
+Search a growing collection of reusable tools instead of guessing how to perform a workflow from scratch.
+
+```bash
+rep search "logs"
+```
+
+Search is backed by SQLite + FTS5, so tool metadata remains searchable as the repertoire grows.
+
+### 👀 Inspect
+
+Before executing a tool, inspect its description, arguments, schema, and implementation metadata.
+
+```bash
+rep inspect my_tool
+```
+
+### ▶️ Run
+
+Execute a tool with structured arguments.
+
+```bash
+rep run my_tool key=value
+```
+
+Arguments are validated against the tool's JSON Schema before execution.
+
+No shell string concatenation is required.
+
+### 🛠️ Create
+
+Turn a successful workflow into a reusable tool.
+
+Tools can be created by humans through the CLI or by agents through MCP.
+
+### 🔧 Update
+
+Improve an existing tool without creating another one-off workflow.
+
+```bash
+rep update ...
+```
+
+### 📖 Learn from source
+
+Agents can retrieve the source of an existing tool when they need to understand or modify it.
+
+---
+
+## MCP interface
+
+Agent Repertoire exposes a small, stable MCP surface:
+
+| Tool              | Purpose                         |
+| ----------------- | ------------------------------- |
+| `search_tools`    | Find reusable tools             |
+| `inspect_tool`    | Inspect a tool and its contract |
+| `run_tool`        | Execute a tool                  |
+| `create_tool`     | Create a new reusable tool      |
+| `get_tool_source` | Read a tool's source            |
+| `update_tool`     | Modify an existing tool         |
+
+The important idea is that **your entire repertoire does not become a giant list of MCP tools**.
+
+The agent gets a small discovery interface and searches for the capability it needs.
+
+That keeps the agent's available tool surface stable while the repertoire can continue growing.
+
+---
+
+## CLI + MCP
+
+Everything you can do through the CLI is designed around the same underlying repertoire used by agents.
+
+```text
+                 Agent Repertoire
+                        │
+             ┌──────────┴──────────┐
+             │                     │
+          CLI `rep`              MCP
+             │                     │
+             └──────────┬──────────┘
+                        │
+                 Local repertoire
+                        │
+              ┌─────────┴─────────┐
+              │                   │
+           SQLite              Tool files
+            FTS5              Python / Bash
+```
+
+Humans can manage the repertoire directly:
+
+```bash
+rep list
+rep search "deploy"
+rep inspect deploy_service
+rep run deploy_service environment=staging
+```
+
+Agents can use the same repertoire through MCP.
+
+---
+
+## How tools execute
+
+Tools are intentionally simple.
+
+Each tool has:
+
+1. **Metadata**
+2. **A JSON Schema**
+3. **An executable entrypoint**
+4. **A language/runtime**
+
+Arguments are validated against the schema and provided to the process as JSON on stdin.
+
+Conceptually:
+
+```text
+Agent
+  │
+  │ structured arguments
+  ↓
+JSON Schema validation
+  │
+  ↓
+Tool process
+  │
+  │ JSON via stdin
+  ↓
+Result
+```
+
+There is no need to construct shell commands by concatenating untrusted argument strings.
+
+Tools can be implemented using Python or Bash.
+
+---
+
+## Where everything lives
+
+By default, Agent Repertoire stores its data under:
+
+```text
+~/.agent-repertoire/
+├── repertoire.db
+└── tools/
+    ├── tool-one/
+    ├── tool-two/
+    └── ...
+```
+
+The database contains tool metadata and the FTS5 search index.
+
+The actual tool implementations remain ordinary files.
+
+You can relocate the data directory with:
+
+```bash
+export AGENT_REPERTOIRE_HOME=/path/to/repertoire
+```
+
+This is also useful for tests and CI environments.
+
+---
+
+## Agent integration
+
+Agent Repertoire currently supports:
+
+* Claude Code
+* OpenCode
+* Codex
+
+Installation configures two things:
+
+1. **MCP** — gives the agent access to the repertoire.
+2. **Skill** — teaches the agent when it should look for or create reusable tools.
+
+For example:
+
+```bash
+rep install --target claude
+```
+
+or:
+
+```bash
+rep install --all
+```
+
+After installation, restart the agent session.
+
+---
+
+## Manual MCP configuration
+
+If you prefer to configure the MCP server yourself, the command is simply:
+
+```text
+rep mcp
+```
 
 ### Claude Code
 
-Add to `~/.claude.json` (user scope) or a project `.mcp.json`:
+Add to your MCP configuration:
 
 ```json
 {
@@ -105,15 +370,10 @@ Add to `~/.claude.json` (user scope) or a project `.mcp.json`:
 }
 ```
 
-(If `~/.local/bin` is not on your agent's `PATH`, use `~/.local/bin/rep` as the command.)
-
 ### OpenCode
-
-Merge into `~/.config/opencode/opencode.json` (or `opencode.jsonc`; respects `XDG_CONFIG_HOME`):
 
 ```json
 {
-  "$schema": "https://opencode.ai/config.json",
   "mcp": {
     "agent-repertoire": {
       "type": "local",
@@ -126,56 +386,223 @@ Merge into `~/.config/opencode/opencode.json` (or `opencode.jsonc`; respects `XD
 
 ### Codex
 
-Add to `~/.codex/config.toml` (or a project `.codex/config.toml` in trusted projects):
-
 ```toml
 [mcp_servers.agent-repertoire]
 command = "rep"
 args = ["mcp"]
 ```
 
-You can also register the server from the CLI: `codex mcp add agent-repertoire -- rep mcp`.
-
-After restarting your agent, the six `agent-repertoire` tools should be available (check with `/mcp` where supported). The MCP server speaks stdio; logs go to stderr only, stdout is reserved for the protocol.
-
-## Quickstart
+Or:
 
 ```bash
-# 1. Create a tool (definition + script)
-mkdir -p my-tool && cd my-tool
-cat > run.sh <<'EOF'
-#!/usr/bin/env bash
-read -r args
-echo "{\"summary\": \"processed\", \"args\": $args}"
-EOF
-cat > tool.yaml <<'EOF'
-name: my_first_tool
-description: Echoes back whatever arguments it receives
-language: bash
-entrypoint: run.sh
-keywords:
-  - example
-EOF
-rep create --file tool.yaml
-
-# 2. Find and run it
-rep search "example"
-rep run my_first_tool x=1
-rep list
-rep inspect my_first_tool
+codex mcp add agent-repertoire -- rep mcp
 ```
 
-Agents (or you) can also create tools through the MCP `create_tool` call — see `docs/prd.md`.
+---
+
+## A better mental model
+
+Think of Agent Repertoire as a **personal toolbox for your agent**.
+
+Without it:
+
+```text
+Task
+ ↓
+Agent improvises
+ ↓
+Runs a bunch of commands
+ ↓
+Gets the result
+ ↓
+Forgets the workflow
+```
+
+With it:
+
+```text
+Task
+ ↓
+Search repertoire
+ ↓
+Find existing capability
+ ↓
+Inspect contract
+ ↓
+Run tool
+ ↓
+Reuse next time
+```
+
+And when the capability doesn't exist:
+
+```text
+Task
+ ↓
+Solve it once
+ ↓
+Create a tool
+ ↓
+Store it
+ ↓
+Reuse it
+```
+
+The goal is not to give the agent more tools.
+
+The goal is to give it **better tools over time**.
+
+---
+
+## Requirements
+
+End users need:
+
+* `bash`
+* `curl` or `wget`
+* `python3`
+* `bash`
+
+Python and Bash are used to execute stored tools.
+
+---
+
+## Install a specific version
+
+To install a specific release:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/andresdigiovanni/agent-repertoire/main/install.sh \
+  | bash -s -- --version v0.1.0
+```
+
+To upgrade, run the installer again:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/andresdigiovanni/agent-repertoire/main/install.sh | bash
+```
+
+---
+
+## Uninstall
+
+Remove the agent integrations:
+
+```bash
+rep uninstall
+```
+
+This removes the Agent Repertoire skill and MCP configuration from supported agents.
+
+Your stored tools remain untouched.
+
+To also delete the local repertoire:
+
+```bash
+rep uninstall --all
+```
+
+For non-interactive environments:
+
+```bash
+rep uninstall --all --yes
+```
+
+Finally, remove the binary:
+
+```bash
+rm ~/.local/bin/rep
+```
+
+---
 
 ## Development
 
+Clone the repository:
+
 ```bash
-git clone https://github.com/andresdigiovanni/agent-repertoire
+git clone https://github.com/andresdigiovanni/agent-repertoire.git
 cd agent-repertoire
-cargo test                    # full suite
-cargo install --path .        # installs to ~/.cargo/bin
 ```
 
-- Rust 1.85+ with `cargo` is only needed for building from source — end users just need the [Install](#install) one-liner.
-- Releases run through the manual `Release` GitHub Actions workflow; the process is documented in [`AGENTS.md`](AGENTS.md).
-- Documentation: product requirements in [`docs/prd.md`](docs/prd.md), design specs in [`docs/superpowers/specs/`](docs/superpowers/specs/), implementation plans in [`docs/superpowers/plans/`](docs/superpowers/plans/).
+Run the test suite:
+
+```bash
+cargo test
+```
+
+Install from source:
+
+```bash
+cargo install --path .
+```
+
+### Requirements for development
+
+* Rust 1.85+
+* Cargo
+
+The release binaries are built separately, so end users do not need Rust.
+
+---
+
+## Project structure
+
+```text
+agent-repertoire/
+├── src/          # Rust implementation
+├── tests/        # Test suite
+├── skill/        # Agent skill
+├── scripts/      # Development / release scripts
+├── .github/      # GitHub Actions
+├── AGENTS.md     # Agent/development guidance
+├── CHANGELOG.md
+├── Cargo.toml
+└── README.md
+```
+
+Additional product and design documentation lives under `docs/`.
+
+---
+
+## Design principles
+
+Agent Repertoire is built around a few simple principles:
+
+### Local first
+
+The repertoire lives on your machine.
+
+### Small agent surface
+
+Agents interact with a small MCP interface instead of receiving every stored tool as a separate MCP tool.
+
+### Structured execution
+
+Tool inputs are defined by JSON Schema and passed as structured JSON.
+
+### Reusable workflows
+
+A workflow that was worth solving once should be cheap to execute again.
+
+### Human-readable tools
+
+Stored tools are ordinary files that humans can inspect, version, debug, and improve.
+
+### Agent-native
+
+Agents can discover and create tools themselves instead of relying exclusively on humans to curate the repertoire.
+
+---
+
+## Contributing
+
+Contributions, ideas, bug reports, and new tool patterns are welcome.
+
+If you find yourself repeatedly asking an agent to perform the same multi-step workflow, that's a good candidate for a reusable repertoire tool.
+
+---
+
+## License
+
+See [LICENSE](LICENSE).
