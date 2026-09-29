@@ -1,7 +1,7 @@
 ---
 
 name: agent-repertoire
-description: Reuses existing tools and creates new reusable tools for non-trivial operational workflows involving Bash, CLI, or API operations. Use when a task involves multiple operational steps, a recurring workflow, or a procedure that may already exist as a reusable tool.
+description: Call search_tools FIRST, before writing any ad-hoc script (bash, node, python, heredoc) or chaining several commands to compute a result — a registered tool from an earlier session may already do it. Covers any domain: code analysis (call graphs, dependency diagrams, per-function counts or metrics), file or report generation, data extraction, logs and incidents, cloud/infra operations. Also use when a task repeats or varies earlier-session work, and to extend a near-fit tool instead of reimplementing it. Not for plain lookups, explanations or hand edits.
 ---
 
 # Agent Repertoire
@@ -12,39 +12,34 @@ Use it to **discover and reuse existing tools before rebuilding operational work
 
 ## When to use
 
-Use Agent Repertoire when the user's request requires **operational work** that is more than a trivial command and could reasonably be represented by a reusable tool.
+The trigger is the **shape of the work, not its domain**: you are about to compute a result mechanically — write a script, parse an AST, walk files, call a CLI or API several times, post-process output. Past sessions may have already turned that procedure into a tool, and the tool encodes conventions (definitions, filters, edge cases) that a fresh reimplementation silently drifts from.
 
-Typical cases include:
+Search the repertoire when any of these holds:
 
-* Investigating logs, errors, incidents, or system state.
-* Performing multi-step cloud, infrastructure, or deployment operations.
-* Managing Kubernetes, AWS, GCP, Azure, or other infrastructure resources.
-* Running workflows that combine multiple CLI commands or API calls.
-* Performing repetitive operational procedures.
-* Troubleshooting a system using a known sequence of commands.
-* Executing a procedure that may have been implemented as a reusable tool already.
+* You are about to write a throwaway script or a multi-line heredoc to produce an answer.
+* The task repeats or varies something done in a previous session ("update the diagram", "rerun the analysis with a different filter", "same report for another service").
+* The task is operational: logs, incidents, deployments, Kubernetes/cloud resources, secrets, backups.
+* You would otherwise answer by chaining several searches or reads into a computed result (counts, rankings, graphs).
+
+Other code tools (codegraph, grep, Read) don't replace the search: they help you do the work by hand, while a registered tool may already do it mechanically.
 
 ### Examples
 
-Use Agent Repertoire for requests such as:
+Search first for requests such as:
 
+* "Update the function-dependency diagram, keeping only functions with more than 2 callers."
+* "Rank the functions in this file by how many callers they have."
 * "Why is the payments service returning 500s?"
-* "Check the logs for this Cloud Run service."
-* "Restart the affected Kubernetes deployments."
-* "Rotate the production secret."
 * "Find which pods are crashlooping and summarize the errors."
 * "Run our standard database backup verification."
 
-Do **not** use Agent Repertoire for simple, self-contained commands when no reusable workflow is involved, such as:
+Do **not** search for self-contained lookups or edits that no script would express, such as:
 
-* `pwd`
-* `ls`
-* `cat file.txt`
-* `git status`
-* A simple grep or lookup.
-* A one-off command whose execution does not represent a reusable workflow.
+* `pwd`, `ls`, `cat file.txt`, `git status`, a single grep.
+* Explaining what a function does.
+* Editing code or prose by hand.
 
-When uncertain whether an existing tool might cover the task, **search the repertoire rather than assuming that no tool exists**.
+When uncertain, **search — it is one call — rather than assuming no tool exists**.
 
 ## Reusing an existing tool
 
@@ -72,6 +67,7 @@ For a task that falls within the scope above:
 
    * If the tool covers only part of the task, use it for that portion.
    * Perform only the uncovered steps directly.
+   * If the tool almost fits — the same procedure with a different filter, threshold or output — add a parameter with `update_tool` (see *Updating an existing tool*) instead of writing a parallel script.
 
 ## Timeouts and long-running tools
 
