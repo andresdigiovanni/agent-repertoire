@@ -1,7 +1,6 @@
 ---
-
 name: agent-repertoire
-description: Call search_tools FIRST, before writing any ad-hoc script (bash, node, python, heredoc) or chaining several commands to compute a result — a registered tool from an earlier session may already do it. Covers any domain: code analysis (call graphs, dependency diagrams, per-function counts or metrics), file or report generation, data extraction, logs and incidents, cloud/infra operations. Also use when a task repeats or varies earlier-session work, and to extend a near-fit tool instead of reimplementing it. Not for plain lookups, explanations or hand edits.
+description: Call search_tools FIRST, before writing any ad-hoc script (bash, node, python, heredoc) or chaining several commands or reads to compute a result — a registered tool from an earlier session may already do it. Covers any domain: code analysis (call graphs, dependency diagrams, per-function counts or metrics), file or report generation, data extraction, logs and incidents, cloud/infra operations. Also use when a task repeats or varies earlier-session work, and to extend a near-fit tool instead of reimplementing it. Not for plain lookups, explanations or hand edits.
 ---
 
 # Agent Repertoire
@@ -71,37 +70,7 @@ For a task that falls within the scope above:
 
 ## Timeouts and long-running tools
 
-Two independent timeouts apply when running a tool through MCP:
-
-* **Client request timeout**: configured in opencode under `mcp.<server>.timeout` (milliseconds, default 5000). It caps every MCP call. When it fires you get `MCP error -32001: Request timed out`, but the server-side subprocess **keeps running** and may still finish its work (write files, update state) after the client gave up.
-* **Server subprocess timeout**: `timeout_seconds` declared in the tool (visible via `inspect_tool`), overridable per call through `run_tool`'s `timeout_seconds` argument. It only limits the subprocess — it does **not** extend the client request timeout.
-
-### Setup requirement — recheck on every install
-
-Since `rep` v0.1, `rep install` registers the `agent-repertoire` MCP server with `timeout: 300000` automatically for opencode, Claude, and codex — creating or patching the entry as needed. Config files containing comments are never rewritten; a manual snippet is printed instead. Still verify after installing on a new machine that the opencode config contains:
-
-```jsonc
-{
-  "mcp": {
-    "agent-repertoire": {
-      "type": "local",
-      "command": ["<path-to-rep>", "mcp"],
-      "enabled": true,
-      "timeout": 300000
-    }
-  }
-}
-```
-
-Restart opencode for config changes to apply. The default of 5000 ms is too short for network-bound tools. If `timeout` is missing or below 300000 (5 minutes), fix it and restart opencode — until then, long-running tools must be executed out-of-band (see rule 2 below).
-
-Rules:
-
-1. Before running a tool that does network work or iterates over many items, check its `timeout_seconds` and estimate the runtime (e.g., N items x per-item cost). If the estimated runtime exceeds the configured client timeout, do not call `run_tool` expecting it to succeed.
-2. For long-running tools, either raise `mcp.<server>.timeout` in opencode config (requires an opencode restart), or run the tool out-of-band: pipe the JSON arguments into the script directly, e.g.
-   `echo '{"project_path": "..."}' | python3 ~/.agent-repertoire/tools/<name>/<entrypoint>.py`
-3. After a `Request timed out`, check for side effects (report files, changed state) before re-running — a previous attempt may have completed in the background.
-4. When creating a tool, set its `timeout_seconds` to comfortably cover the worst-case runtime, and keep the per-item cost documented in the description if the runtime scales with input size.
+A `run_tool` call is capped by the MCP client's request timeout, and a timed-out call keeps running server-side. Before running a tool that does network work or iterates over many items, and after any `Request timed out`, read `references/timeouts.md`.
 
 ## When no suitable tool exists
 
